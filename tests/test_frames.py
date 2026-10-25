@@ -177,3 +177,35 @@ def test_every_frame_samples_native_rate_uncapped(tmp_path):
 
     budgeted = frames.extract(str(clip), tmp_path / "b", fps=10, max_frames=10, cap_fps=False)
     assert len(budgeted) == 10  # --max-frames remains the hard cap
+
+
+def test_get_metadata_prefers_first_parsable_frame_rate(monkeypatch):
+    """Issue 1 regression: ffprobe's truthy '0/0'/'N/A' sentinels must not win
+    the native-fps selection over a usable r_frame_rate."""
+    import json as _json
+    import types
+    payload = {
+        "streams": [{
+            "codec_type": "video", "width": 320, "height": 240, "codec_name": "h264",
+            "avg_frame_rate": "0/0", "r_frame_rate": "30/1", "duration": "3.0",
+        }],
+        "format": {"duration": "3.0", "size": "1000"},
+    }
+    monkeypatch.setattr(frames, "run_text", lambda *a, **kw: types.SimpleNamespace(
+        returncode=0, stdout=_json.dumps(payload), stderr=""))
+    assert frames.get_metadata("ignored.mp4")["fps"] == 30.0
+
+
+def test_get_metadata_fps_zero_when_no_rate_parses(monkeypatch):
+    import json as _json
+    import types
+    payload = {
+        "streams": [{
+            "codec_type": "video", "width": 320, "height": 240, "codec_name": "h264",
+            "avg_frame_rate": "0/0", "r_frame_rate": "N/A", "duration": "3.0",
+        }],
+        "format": {"duration": "3.0", "size": "1000"},
+    }
+    monkeypatch.setattr(frames, "run_text", lambda *a, **kw: types.SimpleNamespace(
+        returncode=0, stdout=_json.dumps(payload), stderr=""))
+    assert frames.get_metadata("ignored.mp4")["fps"] == 0.0

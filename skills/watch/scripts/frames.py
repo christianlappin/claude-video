@@ -129,7 +129,17 @@ def get_metadata(video_path: str) -> dict:
         duration = max(elapsed) if elapsed else float(fmt.get('duration'))
         if any(not math.isfinite(d) or d <= 0 for d in elapsed) or not math.isfinite(duration) or duration <= 0:
             raise ValueError()
-        native_fps = parse_frame_rate(video.get("avg_frame_rate") or video.get("r_frame_rate"))
+        # Pick the first rate that *parses to a positive fps*, not the first
+        # truthy string: ffprobe routinely reports avg_frame_rate "0/0" or "N/A"
+        # (VFR captures, fragmented MP4 from yt-dlp) alongside a usable
+        # r_frame_rate, and those sentinels are truthy — an `or` would keep them.
+        native_fps = next(
+            (rate for rate in (
+                parse_frame_rate(video.get("avg_frame_rate")),
+                parse_frame_rate(video.get("r_frame_rate")),
+            ) if rate > 0),
+            0.0,
+        )
         return {
             "duration_seconds": duration, "width": video.get("width"), "height": video.get("height"),
             "codec": video.get("codec_name"), "size_bytes": int(fmt.get("size") or 0),
@@ -735,7 +745,7 @@ if __name__ == "__main__":
     fps_override = None
     every_frame = False
     resolution = 512
-    max_frames = 80
+    max_frames = 100
     start_arg = None
     end_arg = None
     dedup = True
@@ -758,7 +768,13 @@ if __name__ == "__main__":
         else:
             i += 1
 
-    max_frames = min(max_frames, HARD_MAX_FRAMES)
+    if max_frames > HARD_MAX_FRAMES:
+        print(
+            f"[frames] --max-frames {max_frames} exceeds the hard ceiling; "
+            f"clamping to {HARD_MAX_FRAMES}.",
+            file=sys.stderr,
+        )
+        max_frames = HARD_MAX_FRAMES
     # --every-frame promises no skipped frames, so perceptual dedup stays off.
     if every_frame:
         dedup = False
@@ -776,7 +792,17 @@ if __name__ == "__main__":
     focused = start_sec is not None or end_sec is not None
     if every_frame:
         # Sample at native rate — every decoded frame, no gaps. max_frames caps it.
-        fps = native_fps if native_fps > 0 else MAX_FPS
+        # Refuse to silently fall back to the 2 fps auto-mode ceiling when the
+        # native rate is unknown; require an explicit --fps instead.
+        if native_fps > 0:
+            fps = native_fps
+        elif fps_override is not None:
+            fps = fps_override
+        else:
+            raise SystemExit(
+                "--every-frame could not determine the source's native frame rate; "
+                "pass an explicit --fps N (for example --fps 30)."
+            )
         target = min(max_frames, max(1, int(round(fps * effective_duration))))
     elif focused:
         fps, target = auto_fps_focus(effective_duration, max_frames=max_frames)

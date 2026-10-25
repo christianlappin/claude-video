@@ -110,7 +110,7 @@ python3 "${SKILL_DIR}/scripts/watch.py" "<URL-or-local-path>" --question "<the u
 | `--detail transcript|efficient|balanced|token-burner` | Override the saved detail |
 | `--start T --end T` | Focus on a source-time interval; SS, MM:SS, or HH:MM:SS |
 | `--timestamps T1,T2,...` | Pin cue frames; reserves their budget before detail selection |
-| `--max-frames N` | Positive cap override (hard max 1000) |
+| `--max-frames N` | Positive cap override; clamped to a hard ceiling of 1000 (was unbounded), with a warning when clamped |
 | `--resolution W` | Frame width, default 512; raise to 1024 for text when needed |
 | `--fps F` | Positive uniform rate override, honored verbatim — **not** clamped to 2 fps — reduced only to fit the remaining cap |
 | `--every-frame` | High-density: sample at native fps (every frame, no gaps), capped by `--max-frames`; pair with a tight `--start`/`--end` |
@@ -136,7 +136,7 @@ Best accuracy is usually under 10 minutes. Long clips have sparse coverage under
 
 ### High-density mode — every transition frame
 
-Auto-mode samples at most 2 fps, so a cut, fade, wipe, or fast on-screen change shorter than ~500ms can fall between frames. When the user needs full detail — "don't miss any frames", "show me the exact transition", "frame-by-frame" — `--every-frame` samples at the source's native rate with no gaps. It bypasses the detail engines and perceptual dedup (its contract is "no skipped frames"); transcript cue frames still merge on top. `--fps F` is honored verbatim (the 2 fps ceiling is auto-mode only), and `--max-frames` can rise to 1000 (`HARD_MAX_FRAMES`) as a runaway backstop.
+Auto-mode samples at most 2 fps, so a cut, fade, wipe, or fast on-screen change shorter than ~500ms can fall between frames. When the user needs full detail — "don't miss any frames", "show me the exact transition", "frame-by-frame" — `--every-frame` samples at the source's native rate with no gaps. It bypasses the detail engines and perceptual dedup (its contract is "no skipped frames"); transcript cue frames still merge on top. `--fps F` is honored verbatim (the 2 fps ceiling is auto-mode only), and `--max-frames` is capped at 1000 (`HARD_MAX_FRAMES`) as a runaway backstop — a higher request is clamped with a warning. If the native rate can't be read (a VFR or rate-less source), `--every-frame` errors and asks for an explicit `--fps` rather than silently sampling slower.
 
 ```bash
 # Every frame across a 3-second transition (native fps, no gaps).

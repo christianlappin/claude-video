@@ -266,7 +266,7 @@ Uniform sampling selects actual source frames across the range, reducing its rat
 
 ### High-density mode — every transition frame
 
-Auto-mode tops out at 2 fps, so a cut, fade, or wipe shorter than ~500ms can fall between frames. For frame-by-frame work, `--every-frame` samples at the source's native fps with no gaps — it bypasses the detail engines and perceptual dedup (its contract is "no skipped frames"), while transcript cue frames still merge on top. `--fps F` is honored verbatim (the 2 fps ceiling is auto-mode only), and `--max-frames` may rise to 1000 (`HARD_MAX_FRAMES`) as a runaway backstop.
+Auto-mode tops out at 2 fps, so a cut, fade, or wipe shorter than ~500ms can fall between frames. For frame-by-frame work, `--every-frame` samples at the source's native fps with no gaps — it bypasses the detail engines and perceptual dedup (its contract is "no skipped frames"), while transcript cue frames still merge on top. `--fps F` is honored verbatim (the 2 fps ceiling is auto-mode only), and `--max-frames` is capped at 1000 (`HARD_MAX_FRAMES`) as a runaway backstop — a higher request (previously unbounded, e.g. under `token-burner`) is clamped with a warning. If the native rate can't be read (a VFR or rate-less source), `--every-frame` errors and asks for an explicit `--fps` instead of silently sampling slower.
 
 ```text
 /watch video.mp4 --start 0:45 --end 0:48 --every-frame --max-frames 120

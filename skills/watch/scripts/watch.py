@@ -157,9 +157,17 @@ def main() -> int:
     config = get_config(backend_override="none" if args.no_whisper else args.whisper)
     detail = args.detail or config["detail"]
     max_frames = args.max_frames if args.max_frames is not None else frame_cap(detail)
-    # High-density mode lifts the per-detail cap; clamp to the runaway guard.
-    if max_frames is not None:
-        max_frames = min(max_frames, HARD_MAX_FRAMES)
+    # HARD_MAX_FRAMES is a runaway guard. It can *reduce* an explicit --max-frames
+    # (including token-burner's otherwise-unbounded override), so warn rather than
+    # clamp silently. The per-detail default caps are all well under it.
+    if max_frames is not None and max_frames > HARD_MAX_FRAMES:
+        if args.max_frames is not None:
+            print(
+                f"[watch] --max-frames {max_frames} exceeds the hard ceiling; "
+                f"clamping to {HARD_MAX_FRAMES}.",
+                file=sys.stderr,
+            )
+        max_frames = HARD_MAX_FRAMES
     budget_cap = max_frames if max_frames is not None else 100
     start_sec, end_sec = parse_time(args.start), parse_time(args.end)
     validate_controls(args.resolution, max_frames, start_sec, end_sec, args.fps)
@@ -245,7 +253,18 @@ def main() -> int:
     if args.every_frame:
         # High-density: sample at native rate so no transition frame is skipped.
         # --max-frames caps the count (and ffmpeg enforces it during extraction).
-        fps = native_fps if native_fps > 0 else MAX_FPS
+        # If the native rate is unknown we refuse to silently drop to the 2 fps
+        # auto-mode ceiling and mislabel the run high-density — require --fps.
+        if native_fps > 0:
+            fps = native_fps
+        elif args.fps is not None:
+            fps = args.fps
+        else:
+            raise SystemExit(
+                "--every-frame could not determine the source's native frame rate "
+                "(ffprobe reported none — e.g. a variable-frame-rate or rate-less "
+                "stream). Re-run with an explicit --fps N, for example --fps 30."
+            )
         target = min(every_frame_cap, max(1, int(round(fps * effective_duration))))
     elif focused:
         fps, target = auto_fps_focus(effective_duration, max_frames=budget_cap)
@@ -262,15 +281,16 @@ def main() -> int:
     cue_meta = {}
     detail_budget = max_frames
 
-    if (args.every_frame or (args.fps is not None and args.fps > MAX_FPS)) and not focused and full_duration > 60:
-        print(
-            "[watch] high-density over a full long video — only the first "
-            f"{every_frame_cap if args.every_frame else budget_cap} frames are captured. "
-            "Add --start/--end to target the moment you care about.",
-            file=sys.stderr,
-        )
-
     if video_path and meta.get("has_video", bool(meta.get("width"))):
+        # Warn only when there is actually video to sample — an audio-only source
+        # captures zero frames, so the "only the first N captured" note would lie.
+        if (args.every_frame or (args.fps is not None and args.fps > MAX_FPS)) and not focused and full_duration > 60:
+            print(
+                "[watch] high-density over a full long video — only the first "
+                f"{every_frame_cap if args.every_frame else budget_cap} frames are captured. "
+                "Add --start/--end to target the moment you care about.",
+                file=sys.stderr,
+            )
         try:
             if cue_timestamps:
                 cue_frames, cue_meta = extract_at_timestamps(
