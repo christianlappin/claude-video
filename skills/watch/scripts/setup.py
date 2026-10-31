@@ -189,7 +189,15 @@ def _status(detailed=False):
     chosen = cfg['whisper_backend']
     backend = detected if chosen == 'auto' else chosen
     local_ready = _whisperx_status(cfg, detailed)
-    backend_ready = local_ready if chosen == 'whisperx' else (bool(load_api_key(backend)[1]) if backend in ('groq', 'openai') else chosen == 'none')
+    if chosen == 'whisperx':
+        backend_ready = local_ready
+    elif backend in ('groq', 'openai'):
+        backend_ready = bool(load_api_key(backend)[1])
+    elif backend == 'local':
+        # On-device whisper.cpp/mlx, auto-detected; needs no key or managed install.
+        backend_ready = _have_local_whisper()
+    else:
+        backend_ready = chosen == 'none'
     blocked = bool(missing) and binaries_required
     result = {'status': 'needs_install' if blocked else 'ready', 'can_proceed': not blocked,
               'engine': engine, 'configured_engine': cfg['engine'], 'gemini_key_present': gemini_key,

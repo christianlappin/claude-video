@@ -203,7 +203,7 @@ The first-run wizard asks for your detail preference and fallback backend. Start
 
 | Backend | Requirements and behavior |
 |---|---|
-| `local` | On-device [`whisper.cpp`](https://github.com/ggerganov/whisper.cpp) (`whisper-cli` + a `ggml-*.bin` model) or `mlx_whisper`/`whisper` on `PATH`. No API key, no upload, no size limit; Metal-accelerated on Apple Silicon. Auto-detected and preferred when present. `brew install whisper-cpp` installs the binary but not a model — download one, e.g. `curl -fL -o /opt/homebrew/share/whisper-cpp/ggml-large-v3-turbo-q5_0.bin https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin` (~547 MB). |
+| `local` | On-device [`whisper.cpp`](https://github.com/ggerganov/whisper.cpp) (`whisper-cli` + a `ggml-*.bin` model) or `mlx_whisper`/`whisper` on `PATH`. No API key, no upload, no size limit; Metal-accelerated on Apple Silicon. **Auto-detected** and preferred when present — it is not a `setup.py --backend` choice; just install it (or force one run with `--whisper local`). `brew install whisper-cpp` installs the binary but not a model — download one, e.g. `curl -fL -o /opt/homebrew/share/whisper-cpp/ggml-large-v3-turbo-q5_0.bin https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin` (~547 MB). |
 | `whisperx` | Recommended managed local transcription. No API key; the skill manages a separate Python 3.12 environment and downloads its models. |
 | `groq` | Cloud `whisper-large-v3`; needs `GROQ_API_KEY` from [Groq](https://console.groq.com/keys). |
 | `openai` | Cloud `whisper-1`; needs `OPENAI_API_KEY` from [OpenAI](https://platform.openai.com/api-keys). |
