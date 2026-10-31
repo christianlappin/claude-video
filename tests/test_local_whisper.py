@@ -59,6 +59,85 @@ def test_detection_none_when_nothing_is_installed(monkeypatch):
     assert whisper.detect_local_engine() is None
 
 
+# --- Generic `main` disambiguation ------------------------------------------
+# `main` is whisper.cpp's legacy CLI name but a generic program name: a `main`
+# earlier on PATH must be verified before it's accepted (and invoked) as the
+# transcription engine, so an unrelated `main` isn't run as whisper.cpp.
+
+def _fake_help(*, stdout="", stderr="", exc=None):
+    """Stub for whisper.subprocess.run used by _looks_like_whisper_cpp."""
+    def run(cmd, *a, **k):
+        if exc is not None:
+            raise exc
+        return subprocess.CompletedProcess(cmd, 0, stdout, stderr)
+    return run
+
+
+# A trimmed-but-representative whisper.cpp `--help` banner.
+_WHISPER_CPP_HELP = (
+    "usage: ./main [options] file0.wav file1.wav ...\n"
+    "options:\n"
+    "  -m FNAME,  --model FNAME   [models/ggml-base.en.bin] model path\n"
+    "  -oj,       --output-json   [false  ] output result in a JSON file\n"
+)
+
+
+def test_probe_accepts_real_whisper_cpp_help(monkeypatch):
+    monkeypatch.setattr(whisper.subprocess, "run", _fake_help(stdout=_WHISPER_CPP_HELP))
+    assert whisper._looks_like_whisper_cpp("/usr/bin/main") is True
+
+
+def test_probe_rejects_unrelated_main_help(monkeypatch):
+    unrelated = "usage: main [build|run|clean]\nA toy build tool. See --help.\n"
+    monkeypatch.setattr(whisper.subprocess, "run", _fake_help(stdout=unrelated))
+    assert whisper._looks_like_whisper_cpp("/usr/bin/main") is False
+
+
+def test_probe_fails_closed_on_launch_error(monkeypatch):
+    monkeypatch.setattr(whisper.subprocess, "run", _fake_help(exc=OSError("boom")))
+    assert whisper._looks_like_whisper_cpp("/usr/bin/main") is False
+    monkeypatch.setattr(
+        whisper.subprocess, "run",
+        _fake_help(exc=subprocess.TimeoutExpired(cmd="main", timeout=10)),
+    )
+    assert whisper._looks_like_whisper_cpp("/usr/bin/main") is False
+
+
+def test_detection_rejects_unverified_bare_main(monkeypatch):
+    # Only `main` is on PATH (plus a ggml model), and probing it yields help
+    # that isn't whisper.cpp — so it must NOT be detected/invoked. Before the
+    # fix, bare `main` was trusted unconditionally and this returned a
+    # whisper.cpp engine bound to the unrelated binary.
+    monkeypatch.setattr(whisper.shutil, "which", _fake_which({"main"}))
+    monkeypatch.setattr(whisper, "_find_ggml_model", lambda: "/models/ggml-base.bin")
+    unrelated = "usage: main [build|run|clean]\nA toy build tool.\n"
+    monkeypatch.setattr(whisper.subprocess, "run", _fake_help(stdout=unrelated))
+    assert whisper.detect_local_engine() is None
+
+
+def test_detection_accepts_verified_main(monkeypatch):
+    monkeypatch.setattr(whisper.shutil, "which", _fake_which({"main"}))
+    monkeypatch.setattr(whisper, "_find_ggml_model", lambda: "/models/ggml-base.bin")
+    monkeypatch.setattr(whisper.subprocess, "run", _fake_help(stdout=_WHISPER_CPP_HELP))
+    assert whisper.detect_local_engine() == {
+        "engine": "whisper.cpp",
+        "bin": "/usr/bin/main",
+        "model": "/models/ggml-base.bin",
+    }
+
+
+def test_specific_cpp_names_are_trusted_without_probing(monkeypatch):
+    # whisper-cli/whisper-cpp are specific enough to trust straight off PATH;
+    # the probe subprocess must never run for them.
+    def boom(*a, **k):
+        raise AssertionError("specific cpp names must not be probed")
+    monkeypatch.setattr(whisper.shutil, "which", _fake_which({"whisper-cpp"}))
+    monkeypatch.setattr(whisper, "_find_ggml_model", lambda: "/models/ggml-base.bin")
+    monkeypatch.setattr(whisper.subprocess, "run", boom)
+    engine = whisper.detect_local_engine()
+    assert engine["engine"] == "whisper.cpp" and engine["bin"] == "/usr/bin/whisper-cpp"
+
+
 # --- WATCH_DISABLE_LOCAL_WHISPER kill switch --------------------------------
 
 def test_kill_switch_disables_detection_and_reaches_cloud_key(monkeypatch):

@@ -73,7 +73,10 @@ def _have_local_whisper() -> bool:
     if os.environ.get("WATCH_DISABLE_LOCAL_WHISPER"):
         return False
     override = os.environ.get("WHISPER_MODEL")
-    has_cpp_bin = any(_which(b) for b in ("whisper-cli", "whisper-cpp", "main"))
+    # Reuse whisper.py's resolver so readiness agrees with runtime detection and
+    # a generic `main` on PATH isn't counted as whisper.cpp unless it really is.
+    import whisper
+    has_cpp_bin = whisper._resolve_whisper_cpp_bin() is not None
     has_model = (override and Path(override).expanduser().exists()) or any(
         (Path(d) / n).exists() for d in LOCAL_MODEL_DIRS for n in LOCAL_MODEL_NAMES
     )

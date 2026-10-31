@@ -78,7 +78,13 @@ def plan_chunks(
 #      ggml-*.bin model on disk. Metal-accelerated on Apple Silicon.
 #   2. mlx_whisper / openai-whisper — Python CLIs that download their own model.
 # Set WHISPER_MODEL to point whisper.cpp at a specific ggml model file.
-WHISPER_CPP_BINS = ("whisper-cli", "whisper-cpp", "main")
+#
+# `whisper-cli`/`whisper-cpp` are specific enough to trust straight off PATH.
+# `main` was whisper.cpp's original CLI name, but it's a generic program name:
+# an unrelated `main` on PATH must not be resolved and invoked as whisper.cpp
+# (see _resolve_whisper_cpp_bin / _looks_like_whisper_cpp).
+WHISPER_CPP_BINS = ("whisper-cli", "whisper-cpp")
+WHISPER_CPP_AMBIGUOUS_BINS = ("main",)
 LOCAL_MODEL_DIRS = (
     "/opt/homebrew/share/whisper-cpp",
     "/usr/local/share/whisper-cpp",
@@ -122,6 +128,55 @@ def _find_ggml_model() -> str | None:
     return None
 
 
+# whisper.cpp's CLI (`main`/`whisper-cli`) prints a help banner that names its
+# ggml model default and a whisper.cpp-specific output flag. Requiring one of
+# each is a strong fingerprint: an unrelated program called `main` won't print
+# both, so it can't be mistaken for whisper.cpp.
+_WHISPER_CPP_HELP_IDENTITY = ("ggml", "whisper")
+_WHISPER_CPP_HELP_FLAGS = ("--output-json", "-oj", "--output-srt", "--output-vtt")
+
+
+def _looks_like_whisper_cpp(binary: str) -> bool:
+    """Probe a candidate binary's `--help` to confirm it is really whisper.cpp.
+
+    Used only to disambiguate a generic `main` on PATH before it would be
+    invoked for transcription. Any launch failure (not executable, timeout,
+    crash) means "not whisper.cpp" — we fail closed.
+    """
+    try:
+        result = subprocess.run(
+            [binary, "--help"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return False
+    text = f"{result.stdout}\n{result.stderr}".lower()
+    has_identity = any(marker in text for marker in _WHISPER_CPP_HELP_IDENTITY)
+    has_flag = any(flag in text for flag in _WHISPER_CPP_HELP_FLAGS)
+    return has_identity and has_flag
+
+
+def _resolve_whisper_cpp_bin() -> str | None:
+    """Return the path to a whisper.cpp CLI on PATH, or None.
+
+    Specific names (`whisper-cli`, `whisper-cpp`) are trusted directly. The
+    legacy generic `main` name is accepted only when probing confirms the
+    binary is actually whisper.cpp, so an unrelated `main` earlier on PATH is
+    never resolved and invoked as the transcription engine.
+    """
+    for name in WHISPER_CPP_BINS:
+        found = shutil.which(name)
+        if found:
+            return found
+    for name in WHISPER_CPP_AMBIGUOUS_BINS:
+        found = shutil.which(name)
+        if found and _looks_like_whisper_cpp(found):
+            return found
+    return None
+
+
 def resolve_model_alias(name: str) -> str:
     """Map a friendly model name to a whisper.cpp ggml model path.
 
@@ -152,7 +207,7 @@ def detect_local_engine(model_override: str | None = None) -> dict | None:
     """
     if os.environ.get("WATCH_DISABLE_LOCAL_WHISPER"):
         return None
-    cpp_bin = next((shutil.which(b) for b in WHISPER_CPP_BINS if shutil.which(b)), None)
+    cpp_bin = _resolve_whisper_cpp_bin()
     model = model_override or _find_ggml_model()
     if cpp_bin and model:
         return {"engine": "whisper.cpp", "bin": cpp_bin, "model": model}
